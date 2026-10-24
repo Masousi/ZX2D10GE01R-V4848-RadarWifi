@@ -1,0 +1,44 @@
+# ⚫ AJOUTÉ (24/10/2026) : réglages du radar Wi-Fi CSI.
+# Les identifiants Wi-Fi ne sont PAS ici (sdkconfig est versionné) : voir main/wifi_credentials.example.h.
+menu "Radar Wi-Fi"
+
+    config RADAR_PING_HZ
+        int "Fréquence du ping vers la passerelle (Hz)"
+        range 10 200
+        default 100
+        help
+            Mode connecté : chaque réponse au ping est une trame reçue du point d'accès,
+            donc un échantillon CSI. 50 à 100 Hz donnent un bon compromis réactivité / trafic.
+
+    config RADAR_CALIB_SECONDS
+        int "Durée du calibrage (s)"
+        range 3 60
+        default 10
+        help
+            Pendant le calibrage la pièce doit être vide et immobile : le bruit mesuré sert de référence au seuil.
+
+    config RADAR_CALIB_DELAY_SECONDS
+        int "Délai avant le calibrage de démarrage (s)"
+        range 0 60
+        default 10
+        help
+            Laisse le temps de quitter la pièce après la mise sous tension.
+
+    config RADAR_DEFAULT_SENSITIVITY
+        int "Sensibilité par défaut (1..10)"
+        range 1 10
+        default 6
+
+    config RADAR_PRESENCE_HOLD_SECONDS
+        int "Maintien de la présence après le dernier mouvement (s)"
+        range 2 300
+        default 20
+
+    config RADAR_LED_BRIGHTNESS
+        int "Luminosité max de l'anneau de LED (0..255)"
+        range 0 255
+        default 40
+        help
+            13 LED à 100 % consomment ~0,8 A : rester bas sur une alimentation USB.
+
+endmenu
