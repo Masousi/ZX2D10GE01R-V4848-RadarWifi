@@ -39,6 +39,10 @@ typedef struct {
     float metric;         // variance moyenne normalisée (x1000)
     float threshold;      // seuil courant (même unité que metric)
     float angle_deg;      // signature spectrale -> angle d'affichage (INDICATIF, pas une vraie direction)
+    // ⚫ AJOUTÉ (25/10/2026) : distances (mètres) pour l'affichage 2D / 3D
+    float range_m;        // portée affichée (CONFIG_RADAR_RANGE_M)
+    float dist_m;         // distance ESTIMÉE de la personne : plus la perturbation est forte, plus elle est proche
+    float ap_dist_m;      // distance estimée du point d'accès d'après le RSSI (modèle log-distance), 0 = inconnue
     int sensitivity;      // 1..10
     int calib_pct;        // 0..100 pendant le calibrage
     int pps;              // paquets CSI par seconde

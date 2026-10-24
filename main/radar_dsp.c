@@ -31,6 +31,14 @@
 #define MICRO_MOTION   0.45f   // au-dessus : la présence est entretenue (personne assise qui respire, bouge un peu)
 #define NOSIGNAL_US    3000000 // plus de paquet depuis 3 s
 #define METRIC_FLOOR   0.02f   // seuil minimal (évite un seuil nul si le calibrage est parfaitement calme)
+// ⚫ AJOUTÉ (25/10/2026) : estimation de distance (heuristique) : score 1 (juste au seuil) -> bord de la portée,
+// score NEAR_SCORE et plus -> contre le kit, interpolation logarithmique entre les deux. La perturbation du CSI
+// décroît avec l'éloignement du trajet kit <-> point d'accès : c'est un ORDRE DE GRANDEUR, pas une mesure.
+#define NEAR_SCORE     10.0f
+#define DIST_MIN_M     0.4f
+// Modèle log-distance du RSSI du point d'accès : RSSI(d) = RSSI_1M - 10 * PATH_N * log10(d)
+#define RSSI_1M        (-40.0f)
+#define PATH_N         2.7f
 
 static QueueHandle_t s_q;
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -156,6 +164,9 @@ static void dsp_task(void *arg) {
     const int64_t hold_us = (int64_t)CONFIG_RADAR_PRESENCE_HOLD_SECONDS * 1000000;
     bool motion = false;
     int low_ticks = 0;
+    // ⚫ AJOUTÉ (25/10/2026) : distance estimée, lissée (part du bord de la zone)
+    const float range_m = CONFIG_RADAR_RANGE_M;
+    float dist_m = range_m;
     int pps = 0;
     uint32_t events = 0;
 
@@ -237,6 +248,13 @@ static void dsp_task(void *arg) {
                 presence = true;
             }
             state = motion ? RADAR_ST_MOTION : (presence ? RADAR_ST_PRESENCE : RADAR_ST_EMPTY);
+            // ⚫ AJOUTÉ (25/10/2026) : distance mise à jour seulement pendant un mouvement (score >= 1) ;
+            // une personne immobile garde la dernière distance connue
+            if (score >= MOTION_ON) {
+                float target = range_m * (1.0f - logf(score) / logf(NEAR_SCORE));
+                target = fminf(fmaxf(target, DIST_MIN_M), range_m);
+                dist_m += (target - dist_m) * 0.1f;
+            }
         }
 
         portENTER_CRITICAL(&s_lock);
@@ -250,14 +268,22 @@ static void dsp_task(void *arg) {
         s_st.pps = pps;
         s_st.rssi = (int)lroundf(s_rssi_ema);
         s_st.motion_events = events;
+        // ⚫ AJOUTÉ (25/10/2026)
+        s_st.range_m = range_m;
+        s_st.dist_m = dist_m;
+        s_st.ap_dist_m = (s_rssi_ema < 0) ? powf(10.0f, (RSSI_1M - s_rssi_ema) / (10.0f * PATH_N)) : 0;
         portEXIT_CRITICAL(&s_lock);
 
         static int log_div;
         if (++log_div >= 1000 / TICK_MS) {
             log_div = 0;
             static const char *names[] = {"WIFI", "CALIB", "VIDE", "PRESENCE", "MOUVEMENT", "SANS_SIGNAL"};
-            ESP_LOGI(TAG, "%s metric=%.3f seuil=%.3f score=%.2f pps=%d rssi=%d angle=%.0f",
-                     names[state], s_st.metric, threshold, score, pps, s_st.rssi, s_angle_deg);
+            // ESP_LOGI(TAG, "%s metric=%.3f seuil=%.3f score=%.2f pps=%d rssi=%d angle=%.0f",
+            //          names[state], s_st.metric, threshold, score, pps, s_st.rssi, s_angle_deg);
+            // ⚫ MODIFIÉ (25/10/2026) : + distance estimée de la personne et du point d'accès
+            ESP_LOGI(TAG, "%s metric=%.3f seuil=%.3f score=%.2f pps=%d rssi=%d angle=%.0f dist=%.1fm ap=%.1fm",
+                     names[state], s_st.metric, threshold, score, pps, s_st.rssi, s_angle_deg,
+                     dist_m, s_st.ap_dist_m);
         }
     }
 }

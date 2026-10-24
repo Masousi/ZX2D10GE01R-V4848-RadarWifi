@@ -34,6 +34,23 @@ menu "Radar Wi-Fi"
         range 2 300
         default 20
 
+    # ⚫ AJOUTÉ (25/10/2026) : portée de détection affichée et vue par défaut
+    config RADAR_RANGE_M
+        int "Portée affichée (m)"
+        range 2 20
+        default 8
+        help
+            Rayon de la zone dessinée autour du kit (anneaux tous les quarts de portée).
+            En intérieur, avec une box 2,4 GHz classique, un mouvement humain se détecte en pratique jusqu'à
+            ~8-10 m en vue directe et ~5 m à travers une ou deux cloisons ; au-delà, la perturbation se noie
+            dans le bruit. Augmenter cette valeur agrandit l'échelle, pas la portée physique.
+
+    config RADAR_VIEW_3D
+        bool "Vue 3D au démarrage (sinon radar 2D)"
+        default y
+        help
+            Appui long (1,5 s) sur l'encodeur : bascule entre la vue 3D et la vue radar 2D.
+
     config RADAR_LED_BRIGHTNESS
         int "Luminosité max de l'anneau de LED (0..255)"
         range 0 255

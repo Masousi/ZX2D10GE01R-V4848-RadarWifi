@@ -5,7 +5,9 @@ Image complète (bootloader + table de partitions + application), à flasher à 
 
 | Fichier | Contenu | Taille | SHA-256 |
 |---|---|---|---|
-| `ZX2D10GE01R_radar_wifi.bin` | **Radar Wi-Fi** | 1 083 968 o | `bb207490d212e90e0b8207f2984f1b04c581bd8b0dd01aec9f269018702f2f3f` |
+<!-- | `ZX2D10GE01R_radar_wifi.bin` | **Radar Wi-Fi** | 1 083 968 o | `bb207490d212e90e0b8207f2984f1b04c581bd8b0dd01aec9f269018702f2f3f` | -->
+<!-- ⚫ MODIFIÉ (25/10/2026) : image régénérée (vue 3D, portée 8 m, distance estimée) -->
+| `ZX2D10GE01R_radar_wifi.bin` | **Radar Wi-Fi** (vue 3D + 2D) | 1 092 560 o | `ecc611fdc51dc47ba418b1c87ac14baf41735f1919a9e43479309cdbf930a883` |
 
 - Cible : ESP32-S3 N16R8 (flash 16 Mo, PSRAM octale 8 Mo), ESP-IDF v5.0.9.
 - Compilé sans identifiants Wi-Fi (`main/wifi_credentials.h` vide) : renseigner le réseau puis recompiler.
