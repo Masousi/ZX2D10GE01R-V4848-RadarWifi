@@ -99,8 +99,11 @@ void app_main(void) {
     ESP_ERROR_CHECK(err);
     // ⚫ AJOUTÉ (24/10/2026) : traitement CSI puis Wi-Fi (cœur 0), anneau de LED
     radar_dsp_start();
-    radar_wifi_start();
+    // radar_wifi_start();
     radar_led_start();
     // LVGL tourne dans sa propre tâche sur le cœur 1
     xTaskCreatePinnedToCore(lvgl_task, NULL, 8 * 1024, NULL, 5, NULL, 1);
+    // ⚫ MODIFIÉ (25/10/2026) : Wi-Fi démarré APRÈS l'écran : l'ouverture du portail fait un scan (~3 s)
+    // pendant lequel l'écran restait noir
+    radar_wifi_start();
 }

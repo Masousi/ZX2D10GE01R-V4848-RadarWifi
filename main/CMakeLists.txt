@@ -17,7 +17,10 @@ idf_component_register(
     INCLUDE_DIRS "."
     # REQUIRES esp_lcd driver lvgl esp_timer button mt8901 ws2812
     # ⚫ MODIFIÉ (24/10/2026) : + Wi-Fi / réseau (radar CSI, ping de la passerelle) et NVS
+    # REQUIRES esp_lcd driver lvgl esp_timer button mt8901 ws2812 esp_wifi esp_netif esp_event nvs_flash lwip
+    # ⚫ MODIFIÉ (25/10/2026) : + serveur web et JSON du portail de configuration Wi-Fi
     REQUIRES esp_lcd driver lvgl esp_timer button mt8901 ws2812 esp_wifi esp_netif esp_event nvs_flash lwip
+             esp_http_server json
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE "-Wno-format")

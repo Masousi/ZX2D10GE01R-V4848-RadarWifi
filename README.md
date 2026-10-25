@@ -13,8 +13,9 @@ et les affiche sous forme de **silhouettes humaines** sur une vue 3D (le kit au 
 > WaveSight (auto-calibrage, sorties LED) et de l'exemple Espressif [esp-csi](https://github.com/espressif/esp-csi).
 
 **Sommaire :** [Matériel](#1-matériel-nécessaire) ·
-[Essai rapide](#2-essai-rapide-sans-rien-installer) ·
-[Compiler avec votre Wi-Fi](#3-compiler-avec-votre-wi-fi-recommandé) ·
+[Flasher](#2-flasher-le-firmware-sans-rien-installer) ·
+[Wi-Fi par QR code](#3-connecter-le-radar-à-votre-wi-fi-qr-code) ·
+[Compiler soi-même](#3-bis-compiler-soi-même-facultatif) ·
 [Installation dans la pièce](#4-installation-dans-la-pièce) · [Utilisation](#5-utilisation) ·
 [Portée et précision](#6-portée-et-précision) · [Réglages](#7-réglages) · [Dépannage](#8-dépannage) ·
 [Fonctionnement](#9-comment-ça-marche) · [Code](#10-organisation-du-code)
@@ -33,12 +34,12 @@ et les affiche sous forme de **silhouettes humaines** sur une vue 3D (le kit au 
 Le port USB apparaît comme `COMx` sous Windows (pilote CH343), `/dev/ttyACM0` ou `/dev/ttyUSB0` sous Linux,
 `/dev/cu.usbmodem…` sous macOS. Les exemples ci-dessous utilisent `COM4` : remplacez-le par votre port.
 
-## 2. Essai rapide (sans rien installer)
+<!-- ⚫ MODIFIÉ (25/10/2026) : le Wi-Fi se configure par QR code : le firmware précompilé suffit -->
+## 2. Flasher le firmware (sans rien installer)
 
 <!-- ⚫ AJOUTÉ (24/10/2026) -->
 Le firmware précompilé `firmware/ZX2D10GE01R_radar_wifi.bin` est construit **sans identifiants Wi-Fi** :
-il démarre en **mode passif** (écoute de la box la plus proche, sans connexion). Suffisant pour voir l'écran,
-mais la détection est lente (cf. [§ 6](#6-portée-et-précision)) : pour un vrai usage, passer au § 3.
+au premier démarrage il affiche un **QR code** pour lui indiquer votre Wi-Fi (§ 3). Inutile de compiler.
 
 1. Ouvrir https://espressif.github.io/esptool-js/ dans Chrome ou Edge.
 2. *Connect* → choisir le port du kit.
@@ -53,7 +54,29 @@ esptool.py --chip esp32s3 -p COM4 -b 460800 write_flash 0x0 firmware/ZX2D10GE01R
 
 Détails et empreinte SHA-256 : [firmware/README.md](firmware/README.md).
 
-## 3. Compiler avec votre Wi-Fi (recommandé)
+<!-- ⚫ AJOUTÉ (25/10/2026) : portail de configuration Wi-Fi + QR code (comme RadarAvion / AnimalDeCompanie) -->
+## 3. Connecter le radar à votre Wi-Fi (QR code)
+
+Sans réseau enregistré, le kit crée son propre Wi-Fi **`RadarWifi_Config`** (ouvert) et affiche l'écran
+**Configuration Wi-Fi** avec un QR code :
+
+1. Scanner le QR code avec l'appareil photo du téléphone → « Rejoindre le réseau RadarWifi_Config ».
+2. La page de configuration s'ouvre toute seule (sinon : ouvrir **http://192.168.4.1** dans le navigateur).
+3. Choisir la box **de la pièce à surveiller** (2,4 GHz) dans la liste, saisir le mot de passe,
+   *Enregistrer et redémarrer*.
+4. Le kit redémarre, se connecte à la box et lance le calibrage (§ 4). Le téléphone peut quitter `RadarWifi_Config`.
+
+Le réseau est enregistré dans la mémoire du kit (NVS) : il survit aux coupures de courant. Le mot de passe
+n'est envoyé nulle part.
+
+| Situation | Ce que fait le kit |
+|---|---|
+| premier démarrage, aucun réseau | écran QR code |
+| réseau enregistré mais connexion impossible pendant 30 s (mot de passe faux, box éteinte) | écran QR code avec « Connexion à « … » impossible » ; sans visite pendant 5 min, nouvel essai automatique |
+| changer de réseau | **maintenir l'encodeur 4 s** (« Configuration Wi-Fi... ») → écran QR code |
+| sur l'écran QR code, **appui court** | réseau enregistré : nouvel essai ; sinon : continuer **sans Wi-Fi** (mode passif, détection lente) |
+
+## 3 bis. Compiler soi-même (facultatif)
 
 ### 3.1 Installer ESP-IDF v5.0.9
 
@@ -61,15 +84,16 @@ Suivre le guide officiel : https://docs.espressif.com/projects/esp-idf/en/v5.0.9
 (Windows : *ESP-IDF Tools Installer* ; Linux / macOS : `git clone -b v5.0.9 --recursive` puis `./install.sh esp32s3`).
 Une autre version 5.0.x convient a priori ; les versions 5.1+ n'ont pas été testées.
 
-### 3.2 Renseigner le Wi-Fi
+### 3.2 Récupérer le code et, en option, pré-renseigner le Wi-Fi
 
 ```sh
 git clone https://github.com/Masousi/ZX2D10GE01R-V4848-RadarWifi.git
 cd ZX2D10GE01R-V4848-RadarWifi
-cp main/wifi_credentials.example.h main/wifi_credentials.h      # Windows : copy
 ```
 
-Éditer `main/wifi_credentials.h` :
+<!-- ⚫ MODIFIÉ (25/10/2026) : facultatif depuis le portail QR code -->
+Facultatif (le QR code du § 3 suffit) : pour qu'un kit flashé se connecte sans passer par le QR code,
+copier `main/wifi_credentials.example.h` en `main/wifi_credentials.h` et l'éditer :
 
 ```c
 #define RADAR_WIFI_SSID     "NomDeVotreBox"
@@ -77,7 +101,7 @@ cp main/wifi_credentials.example.h main/wifi_credentials.h      # Windows : copy
 ```
 
 Ce fichier est **ignoré par git** : le mot de passe ne part pas sur GitHub. S'il est absent, il est créé vide au
-premier build (= mode passif).
+premier build (= écran QR code). Un réseau enregistré par le QR code reste prioritaire sur ce fichier.
 
 ### 3.3 Compiler et flasher
 
@@ -98,7 +122,7 @@ Journal série attendu en mode connecté (**exemple** : adresses et valeurs indi
 
 ```
 esp_psram: Found 8MB PSRAM device
-RADAR_WIFI: mode connecté : NomDeVotreBox, ping 100 Hz
+RADAR_WIFI: mode connecté : NomDeVotreBox (enregistré), ping 100 Hz
 MAIN: Peripheriques initialises
 RADAR_UI: vue 3D
 RADAR_WIFI: connecté à NomDeVotreBox canal 6, IP 192.168.1.42, passerelle 192.168.1.254, AP ..:..
@@ -113,10 +137,18 @@ RADAR_UI: vue 3D : 11 images/s
 **`pps` doit approcher 100** en mode connecté ; en dessous de ~20, la détection est lente.
 
 <!-- ⚫ AJOUTÉ (24/10/2026) : journal réellement relevé sur la carte (mode passif, sans identifiants) -->
-Démarrage relevé sur la carte en mode passif (sans identifiants) :
+<!-- ⚫ MODIFIÉ (25/10/2026) : sans identifiants le kit ouvre désormais le portail ; le passif se choisit sur l'écran QR -->
+Sans réseau enregistré (écran QR code) :
 
 ```
-RADAR_WIFI: pas d'identifiants (main/wifi_credentials.h) : mode passif
+RADAR_PORTAL: Portail de configuration : Aucun réseau Wi-Fi enregistré
+RADAR_PORTAL: Point d'accès 'RadarWifi_Config' prêt : http://192.168.4.1
+```
+
+Mode passif (appui court sur l'écran QR code), relevé sur la carte :
+
+```
+RADAR_WIFI: mode passif demandé
 MAIN: Peripheriques initialises
 RADAR_WIFI: mode passif : <SSID> canal 11 (-34 dBm) e4:9e:12:..:..:..
 RADAR_DSP: CALIB metric=0.000 seuil=0.000 score=0.00 pps=3 rssi=-41 angle=0
@@ -127,7 +159,8 @@ RADAR_DSP: calibrage : quittez la pièce (10 s), mesure 10 s
 
 1. Placer le kit et la box **de part et d'autre de la zone à surveiller**, 1 à 5 m l'un de l'autre,
    idéalement à hauteur de buste. La zone la plus sensible est le **trajet direct entre les deux**.
-2. Alimenter le kit. Écran « CONNEXION » puis « CALIBRAGE ».
+2. Alimenter le kit. Écran « CONNEXION » puis « CALIBRAGE » (écran QR code si le Wi-Fi n'est pas encore
+   configuré : § 3).
 3. **Quitter la pièce** pendant le calibrage : 10 s d'attente (« Quittez la pièce N s ») puis 10 s de mesure
    du bruit. Rien ne doit bouger (ventilateur, rideau, animal).
 4. Revenir : la silhouette apparaît.
@@ -165,7 +198,9 @@ sensibilité. En bas : courbe du score (ligne sombre = seuil de détection), ré
 |---|---|
 | Rotation | sensibilité 1..10 (10 = plus sensible), affichée 1,5 s |
 | Appui court | recalibrage (quitter la pièce) |
-| <!-- ⚫ MODIFIÉ (25/10/2026) --> Appui long (1,5 s) | bascule vue 3D ↔ vue 2D |
+| <!-- ⚫ MODIFIÉ (25/10/2026) --> Appui long (1,5 à 4 s, au relâchement) | bascule vue 3D ↔ vue 2D (« Relâchez : vue 2D/3D ») |
+| <!-- ⚫ AJOUTÉ (25/10/2026) --> Appui maintenu 4 s | configuration Wi-Fi : écran QR code (§ 3) |
+| <!-- ⚫ AJOUTÉ (25/10/2026) --> Appui court sur l'écran QR code | réessayer le réseau enregistré, ou continuer sans Wi-Fi (passif) |
 
 Trop de fausses détections → baisser la sensibilité ; personne détectée trop tard → l'augmenter.
 
@@ -219,6 +254,8 @@ ellipse autour du **trajet kit ↔ box** (zones de Fresnel).
 | `RADAR_PRESENCE_HOLD_SECONDS` | 20 | maintien de la présence après le dernier mouvement |
 | <!-- ⚫ AJOUTÉ (25/10/2026) --> `RADAR_RANGE_M` | 8 | portée affichée (m) |
 | <!-- ⚫ AJOUTÉ (25/10/2026) --> `RADAR_VIEW_3D` | oui | vue 3D au démarrage (sinon 2D) |
+| <!-- ⚫ AJOUTÉ (25/10/2026) --> `RADAR_AP_SSID` | RadarWifi_Config | nom du Wi-Fi de configuration du kit (QR code) |
+| <!-- ⚫ AJOUTÉ (25/10/2026) --> `RADAR_STA_TIMEOUT_SECONDS` | 30 | délai de connexion avant d'afficher le QR code |
 | `RADAR_LED_BRIGHTNESS` | 40 | luminosité max de l'anneau (0..255) |
 
 Après modification de `main/Kconfig.projbuild` lui-même : `idf.py reconfigure` (sinon `CONFIG_RADAR_… undeclared`).
@@ -227,8 +264,11 @@ Après modification de `main/Kconfig.projbuild` lui-même : `idf.py reconfigure`
 
 | Symptôme | Cause probable | Solution |
 |---|---|---|
-| Reste sur « Connexion Wi-Fi... » | <!-- ⚫ AJOUTÉ (24/10/2026) --> SSID / mot de passe faux, ou réseau 5 GHz seulement | vérifier `main/wifi_credentials.h` (raison de déconnexion dans le journal) |
-| `pps` entre 0 et 8, reste en CALIBRAGE longtemps | <!-- ⚫ AJOUTÉ (24/10/2026) --> mode passif (pas d'identifiants) | renseigner `main/wifi_credentials.h` et recompiler |
+| Reste sur « Connexion Wi-Fi... » | <!-- ⚫ AJOUTÉ (24/10/2026) --> SSID / mot de passe faux, ou réseau 5 GHz seulement | <!-- ⚫ MODIFIÉ (25/10/2026) --> au bout de 30 s l'écran QR code s'affiche : ressaisir le réseau (§ 3) ; raison de déconnexion dans le journal |
+| <!-- ⚫ AJOUTÉ (25/10/2026) --> Le QR code ne s'ouvre pas sur le téléphone | appareil photo sans lecture de QR Wi-Fi | se connecter à la main au Wi-Fi `RadarWifi_Config`, puis ouvrir http://192.168.4.1 |
+| <!-- ⚫ AJOUTÉ (25/10/2026) --> La page ne s'ouvre pas toute seule | le téléphone garde les données mobiles | ouvrir http://192.168.4.1 ; accepter « rester connecté sans Internet » |
+| <!-- ⚫ AJOUTÉ (25/10/2026) --> Ma box n'est pas dans la liste | box en 5 GHz seulement, ou réseau masqué | activer le 2,4 GHz de la box ; réseau masqué : champ « nom du réseau » |
+| `pps` entre 0 et 8, reste en CALIBRAGE longtemps | <!-- ⚫ AJOUTÉ (24/10/2026) --> mode passif (pas d'identifiants) | <!-- ⚫ MODIFIÉ (25/10/2026) --> maintenir l'encodeur 4 s et configurer le Wi-Fi par QR code |
 | MOUVEMENT permanent | <!-- ⚫ AJOUTÉ (24/10/2026) --> seuil trop bas ou calibrage avec quelqu'un dans la pièce | tourner l'encodeur (sensibilité −), ou appui court = recalibrer pièce vide |
 | Rien n'est détecté | sensibilité trop basse, kit et box côte à côte | sensibilité +, éloigner kit et box de part et d'autre de la zone |
 | Écran noir + `no mem for frame buffer` + redémarrages | PSRAM désactivée (`sdkconfig` régénéré) | supprimer `sdkconfig`, puis `idf.py build` (reprend `sdkconfig.defaults`) |
@@ -273,6 +313,7 @@ Exemple de journal (1/s) : `RADAR_DSP: MOUVEMENT metric=0.912 seuil=0.240 score=
 | `main/main.c` | initialisation des périphériques, tâche LVGL, démarrage du radar |
 | `main/radar.h` | types et API partagés |
 | `main/radar_wifi.c` | Wi-Fi (connecté + ping / passif), callback CSI filtré sur le BSSID |
+| <!-- ⚫ AJOUTÉ (25/10/2026) --> `main/wifi_portal.c` | portail de configuration : point d'accès, page web, DNS captif, identifiants en NVS |
 | `main/radar_dsp.c` | variance glissante, calibrage, machine d'états, distances estimées |
 | `main/radar_ui.c` | écran : vues 3D / 2D, silhouettes humaines animées, courbe, encodeur |
 | <!-- ⚫ AJOUTÉ (25/10/2026) --> ↳ vue 3D | projection perspective (`project()`), sol, kit, box, silhouettes mises à l'échelle |

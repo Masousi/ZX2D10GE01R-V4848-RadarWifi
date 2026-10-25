@@ -17,8 +17,12 @@
 //  - VUE 2D : le radar d'origine, anneaux désormais gradués en mètres.
 //  Distance au kit = distance ESTIMÉE (radar_dsp.c : plus la perturbation est forte, plus la personne est
 //  proche), affichée au-dessus de la silhouette ("~3,5 m"). L'angle reste indicatif.
+// ⚫ AJOUTÉ (25/10/2026) : écran "Configuration Wi-Fi" (portail, cf. wifi_portal.c) : QR code pour rejoindre le
+//  réseau du kit, la page de configuration s'ouvre toute seule. Encodeur : appui maintenu 4 s = rouvrir le portail ;
+//  sur l'écran du portail, appui court = réessayer le réseau enregistré, ou continuer sans Wi-Fi (mode passif).
 #include <math.h>
 #include <stdio.h>
+#include <string.h>   // ⚫ AJOUTÉ (25/10/2026)
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
@@ -56,6 +60,7 @@ LV_FONT_DECLARE(font_fr_28);
 #define HUMAN_EXAG  1.6f       // silhouettes agrandies pour rester lisibles sur 2,1"
 #define LONG_PRESS_MS 1500
 #define HINT_MS     8000
+#define WIFI_HOLD_MS 4000      // ⚫ AJOUTÉ (25/10/2026) : appui maintenu -> portail de configuration Wi-Fi
 
 #define COL_GRID    lv_color_hex(0x0b4a24)
 #define COL_SWEEP   lv_color_hex(0x22ff88)
@@ -116,6 +121,10 @@ static int16_t s_enc_last;
 static uint32_t s_btn_down_ms;
 static bool s_btn_down, s_btn_long_done;
 static uint32_t s_hint_until_ms;
+// ⚫ AJOUTÉ (25/10/2026) : écran du portail Wi-Fi et retour visuel de l'appui maintenu
+static lv_obj_t *s_portal, *s_portal_info, *s_portal_steps, *s_portal_hint;
+static uint32_t s_portal_req_at_ms;
+static int s_hold_msg;   // 1 = "relâchez : vue / maintenez : Wi-Fi", 2 = "Configuration Wi-Fi..."
 
 // -----------------------------------------------------------------------------------------------------------
 // Silhouette
@@ -411,22 +420,105 @@ static void input_poll(const radar_status_t *st) {
     //     s_btn_ticks = 0;
     // }
     // ⚫ MODIFIÉ (25/10/2026) : appui court (relâché avant 1,5 s) = recalibrage ; appui long = changer de vue
+    // uint32_t now = lv_tick_get();
+    // if (gpio_get_level(BTN_PIN) == 0) {
+    //     if (!s_btn_down) {
+    //         s_btn_down = true;
+    //         s_btn_long_done = false;
+    //         s_btn_down_ms = now;
+    //     } else if (!s_btn_long_done && now - s_btn_down_ms >= LONG_PRESS_MS) {
+    //         s_btn_long_done = true;
+    //         set_view(!s_view3d);
+    //     }
+    // } else if (s_btn_down) {
+    //     s_btn_down = false;
+    //     if (!s_btn_long_done && now - s_btn_down_ms >= 60) {
+    //         radar_request_calibration();
+    //     }
+    // }
+    // ⚫ MODIFIÉ (25/10/2026) : la vue change au RELÂCHEMENT (entre 1,5 et 4 s) pour libérer l'appui maintenu 4 s
+    // = portail Wi-Fi. Sur l'écran du portail : appui court = réessayer le réseau enregistré / mode passif.
     uint32_t now = lv_tick_get();
     if (gpio_get_level(BTN_PIN) == 0) {
         if (!s_btn_down) {
             s_btn_down = true;
             s_btn_long_done = false;
             s_btn_down_ms = now;
-        } else if (!s_btn_long_done && now - s_btn_down_ms >= LONG_PRESS_MS) {
+        } else if (!st->portal && !s_btn_long_done && now - s_btn_down_ms >= WIFI_HOLD_MS) {
             s_btn_long_done = true;
-            set_view(!s_view3d);
+            s_hold_msg = 2;
+            s_portal_req_at_ms = now + 400;   // le message s'affiche avant le redémarrage
+        } else if (!st->portal && !s_btn_long_done && now - s_btn_down_ms >= LONG_PRESS_MS) {
+            s_hold_msg = 1;
         }
     } else if (s_btn_down) {
         s_btn_down = false;
-        if (!s_btn_long_done && now - s_btn_down_ms >= 60) {
-            radar_request_calibration();
+        uint32_t held = now - s_btn_down_ms;
+        if (s_hold_msg == 1) {
+            s_hold_msg = 0;
+        }
+        if (!s_btn_long_done && held >= 60) {
+            if (st->portal) {
+                if (st->has_saved_ssid) {
+                    radar_request_retry();
+                } else {
+                    radar_request_passive();
+                }
+            } else if (held >= LONG_PRESS_MS) {
+                set_view(!s_view3d);
+            } else {
+                radar_request_calibration();
+            }
         }
     }
+    if (s_portal_req_at_ms && (int32_t)(now - s_portal_req_at_ms) >= 0) {
+        s_portal_req_at_ms = 0;
+        radar_request_portal();
+    }
+}
+
+// ⚫ AJOUTÉ (25/10/2026) : écran du portail (repris de RadarAvion) : raison, QR code "rejoindre le Wi-Fi du kit",
+// étapes, action de l'appui court
+static void portal_update(const radar_status_t *st) {
+    lv_label_set_text(s_portal_info, st->portal_msg);
+    if (st->portal_clients > 0) {
+        lv_label_set_text_fmt(s_portal_steps, "%d appareil connecté\nOuvrez http://" RADAR_AP_IP, st->portal_clients);
+    } else {
+        lv_label_set_text(s_portal_steps, "Scannez le QR code :\nla page s'ouvre toute seule");
+    }
+    lv_label_set_text(s_portal_hint, st->has_saved_ssid ? "Appui : réessayer le réseau enregistré"
+                                                       : "Appui : continuer sans Wi-Fi (mode passif)");
+}
+
+static void portal_build(lv_obj_t *scr) {
+    s_portal = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_portal);
+    lv_obj_set_size(s_portal, 480, 480);
+    lv_obj_set_style_bg_color(s_portal, lv_color_hex(0x020c07), 0);
+    lv_obj_set_style_bg_opa(s_portal, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(s_portal, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *title = label(s_portal, &font_fr_28, COL_EMPTY, LV_ALIGN_TOP_MID, 44);
+    lv_label_set_text(title, "Configuration Wi-Fi");
+    s_portal_info = label(s_portal, &font_fr_20, COL_WARN, LV_ALIGN_TOP_MID, 84);
+    lv_obj_set_width(s_portal_info, 330);
+    lv_label_set_long_mode(s_portal_info, LV_LABEL_LONG_DOT);
+
+    // QR code "rejoindre le Wi-Fi" (appareil photo du téléphone), sur fond blanc (marge de lecture)
+    lv_obj_t *qbox = box(s_portal, 178, 178, 12, lv_color_white(), lv_color_white(), 0);
+    lv_obj_align(qbox, LV_ALIGN_CENTER, 0, -26);
+    lv_obj_t *qr = lv_qrcode_create(qbox, 156, lv_color_black(), lv_color_white());
+    static const char wifi_qr[] = "WIFI:T:nopass;S:" CONFIG_RADAR_AP_SSID ";;";
+    lv_qrcode_update(qr, wifi_qr, strlen(wifi_qr));
+    lv_obj_center(qr);
+
+    lv_obj_t *net = label(s_portal, &font_fr_20, lv_color_white(), LV_ALIGN_CENTER, 82);
+    lv_label_set_text(net, "Wi-Fi : " CONFIG_RADAR_AP_SSID);
+    s_portal_steps = label(s_portal, &font_fr_20, COL_TEXT, LV_ALIGN_CENTER, 128);
+    s_portal_hint = label(s_portal, &font_fr_20, lv_color_hex(0x6f9a80), LV_ALIGN_BOTTOM_MID, -40);
+    lv_obj_set_width(s_portal_hint, 250);
+    lv_label_set_long_mode(s_portal_hint, LV_LABEL_LONG_WRAP);
+    obj_show(s_portal, false);
 }
 
 // -----------------------------------------------------------------------------------------------------------
@@ -525,6 +617,15 @@ static void ui_timer_cb(lv_timer_t *t) {
         st.range_m = CONFIG_RADAR_RANGE_M;   // ⚫ AJOUTÉ (25/10/2026) : avant la 1re mise à jour du DSP
     }
 
+    // ⚫ AJOUTÉ (25/10/2026) : portail Wi-Fi : écran QR code seul (le radar en dessous n'est plus animé)
+    if (st.portal) {
+        obj_show(s_portal, true);
+        if (s_ticks % 5 == 1) {
+            portal_update(&st);
+        }
+        return;
+    }
+
     // ⚫ AJOUTÉ (25/10/2026) : images/s réellement affichées (rendu plein écran), dans le journal toutes les 10 s
     static uint32_t fps_t0, fps_n;
     fps_n++;
@@ -551,7 +652,12 @@ static void ui_timer_cb(lv_timer_t *t) {
         lv_obj_set_style_line_color(s_sweep3[0], st.state == RADAR_ST_MOTION ? COL_MOTION : COL_SWEEP, 0);
     }
 
-    if (s_toast_ticks > 0) {
+    // ⚫ AJOUTÉ (25/10/2026) : retour visuel de l'appui maintenu (vue / portail Wi-Fi)
+    if (s_hold_msg == 1) {
+        lv_label_set_text(s_lbl_msg, "Relâchez : vue 2D/3D\nMaintenez : Wi-Fi");
+    } else if (s_hold_msg == 2) {
+        lv_label_set_text(s_lbl_msg, "Configuration Wi-Fi...");
+    } else if (s_toast_ticks > 0) {
         s_toast_ticks--;
         lv_label_set_text_fmt(s_lbl_msg, "Sensibilité\n%d / 10", st.sensitivity);
     } else if (st.state == RADAR_ST_WIFI) {
@@ -818,10 +924,15 @@ void radar_ui_init(void) {
     // (police 14 px : le bas de l'écran rond ne fait que ~240 px de large ; ASCII uniquement, pas de "·")
     s_lbl_link = label(scr, &lv_font_montserrat_14, COL_TEXT, LV_ALIGN_BOTTOM_MID, -26);
     s_lbl_hint = label(scr, &lv_font_montserrat_14, lv_color_hex(0x8fc4a2), LV_ALIGN_BOTTOM_MID, -26);
-    lv_label_set_text(s_lbl_hint, "appui : calibrer - long : vue 2D/3D");
+    // lv_label_set_text(s_lbl_hint, "appui : calibrer - long : vue 2D/3D");
+    // ⚫ MODIFIÉ (25/10/2026) : + appui de 4 s = configuration Wi-Fi
+    lv_label_set_text(s_lbl_hint, "2 s : vue 2D/3D - 4 s : Wi-Fi");
     // ⚫ AJOUTÉ (25/10/2026) : distance estimée au-dessus de la silhouette
     s_lbl_dist = label(scr, &font_fr_20, lv_color_white(), LV_ALIGN_TOP_MID, 0);
     obj_show(s_lbl_dist, false);
+
+    // ⚫ AJOUTÉ (25/10/2026) : écran du portail, au-dessus de tout
+    portal_build(scr);
 
     s_enc_last = mt8901_get_count();
     // ⚫ AJOUTÉ (25/10/2026)

@@ -51,6 +51,20 @@ menu "Radar Wi-Fi"
         help
             Appui long (1,5 s) sur l'encodeur : bascule entre la vue 3D et la vue radar 2D.
 
+    # ⚫ AJOUTÉ (25/10/2026) : portail de configuration Wi-Fi
+    config RADAR_AP_SSID
+        string "Nom du réseau de configuration (point d'accès du kit)"
+        default "RadarWifi_Config"
+        help
+            Sans réseau enregistré (ou si la connexion échoue), le kit crée ce réseau ouvert et affiche un
+            QR code pour le rejoindre : la page de configuration (http://192.168.4.1) s'ouvre toute seule.
+            Appui de 4 s sur l'encodeur : rouvrir le portail à tout moment.
+
+    config RADAR_STA_TIMEOUT_SECONDS
+        int "Délai de connexion au réseau enregistré avant d'ouvrir le portail (s)"
+        range 10 120
+        default 30
+
     config RADAR_LED_BRIGHTNESS
         int "Luminosité max de l'anneau de LED (0..255)"
         range 0 255

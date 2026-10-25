@@ -38,3 +38,5 @@ CONFIG_LV_COLOR_SCREEN_TRANSP=y
 # ⚫ RETIRÉ (24/10/2026) : choix de la démo (APP_DEMO_RUN_*) et démos LVGL (LV_USE_DEMO_*), supprimées du projet
 # ⚫ AJOUTÉ (24/10/2026) : radar Wi-Fi : réception des données CSI (Channel State Information)
 CONFIG_ESP32_WIFI_CSI_ENABLED=y
+# ⚫ AJOUTÉ (25/10/2026) : QR code du portail de configuration Wi-Fi
+CONFIG_LV_USE_QRCODE=y

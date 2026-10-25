@@ -4,6 +4,10 @@
 //    CONFIG_RADAR_PING_HZ. Chaque réponse est une trame émise par le point d'accès -> un échantillon CSI
 //    régulier (~100/s). Méthode de l'exemple Espressif esp-csi et d'ESPectre.
 //  - PASSIF (SSID vide) : scan, puis écoute en mode promiscuous du point d'accès le plus fort (balises ~10/s).
+// ⚫ MODIFIÉ (25/10/2026) : identifiants : réseau enregistré via le portail (NVS) > main/wifi_credentials.h >
+// portail de configuration (point d'accès + QR code, wifi_portal.c). Le mode passif n'est plus automatique :
+// il se choisit depuis l'écran du portail (appui court) ; échec de connexion au bout de
+// CONFIG_RADAR_STA_TIMEOUT_SECONDS -> portail.
 // Dans les deux cas seules les trames émises par CE point d'accès (adresse MAC source = BSSID) sont gardées :
 // mélanger plusieurs émetteurs rendrait la variance des sous-porteuses inexploitable.
 #include <string.h>
@@ -27,6 +31,11 @@ static uint8_t s_target_mac[6];
 static volatile bool s_target_valid;
 static esp_ping_handle_t s_ping;
 static char s_ssid[33];
+// ⚫ AJOUTÉ (25/10/2026)
+static char s_pass[65];
+static volatile bool s_sta_mode;     // connexion au réseau de la pièce (sinon portail ou passif)
+static volatile bool s_got_ip;
+static int s_ap_clients;             // téléphones connectés au portail
 
 static inline uint8_t csi_amp(const int8_t *buf, int idx) {
     // Chaque sous-porteuse = 2 octets signés : partie imaginaire puis partie réelle
@@ -106,11 +115,21 @@ static void ping_start(uint32_t gw_addr) {
 }
 
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
+    // ⚫ AJOUTÉ (25/10/2026) : clients du portail ; les événements station ne concernent que le mode connecté
+    if (base == WIFI_EVENT && (id == WIFI_EVENT_AP_STACONNECTED || id == WIFI_EVENT_AP_STADISCONNECTED)) {
+        s_ap_clients += (id == WIFI_EVENT_AP_STACONNECTED) ? 1 : (s_ap_clients > 0 ? -1 : 0);
+        radar_set_portal_clients(s_ap_clients);
+        return;
+    }
+    if (!s_sta_mode) {
+        return;
+    }
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         radar_set_link(s_ssid, 0, false, "Connexion Wi-Fi...");
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const wifi_event_sta_disconnected_t *ev = data;
+        s_got_ip = false;   // ⚫ AJOUTÉ (25/10/2026)
         ESP_LOGW(TAG, "déconnecté (raison %d), nouvelle tentative", ev->reason);
         s_target_valid = false;
         if (s_ping) {
@@ -121,6 +140,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
         esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *ev = data;
+        s_got_ip = true;   // ⚫ AJOUTÉ (25/10/2026)
         wifi_ap_record_t ap;
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
             memcpy(s_target_mac, ap.bssid, 6);
@@ -133,25 +153,57 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
     }
 }
 
-static void wifi_start_sta(void) {
+// ⚫ AJOUTÉ (25/10/2026) : initialisation commune (station + point d'accès du portail), faite une seule fois
+static void wifi_init_common(void) {
     esp_netif_create_default_wifi_sta();
+    esp_netif_create_default_wifi_ap();
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&init));
     // Pas d'écriture NVS par le Wi-Fi : une écriture flash suspend le cache et fait "glisser" l'écran RGB
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL));
+}
+
+// ⚫ AJOUTÉ (25/10/2026) : pas d'adresse IP au bout du délai (mot de passe faux, box absente) -> portail
+static void sta_watch_task(void *arg) {
+    vTaskDelay(pdMS_TO_TICKS(CONFIG_RADAR_STA_TIMEOUT_SECONDS * 1000));
+    if (!s_got_ip) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Connexion à « %.28s » impossible", s_ssid);
+        s_sta_mode = false;
+        wifi_portal_start(msg, true);
+    }
+    vTaskDelete(NULL);
+}
+
+static void wifi_start_sta(void) {
+    // esp_netif_create_default_wifi_sta();
+    // wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
+    // ESP_ERROR_CHECK(esp_wifi_init(&init));
+    // // Pas d'écriture NVS par le Wi-Fi : une écriture flash suspend le cache et fait "glisser" l'écran RGB
+    // ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+    // ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL));
+    // ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL));
+    // ⚫ MODIFIÉ (25/10/2026) : initialisation déplacée dans wifi_init_common()
 
     wifi_config_t cfg = {0};
-    strlcpy((char *)cfg.sta.ssid, RADAR_WIFI_SSID, sizeof(cfg.sta.ssid));
-    strlcpy((char *)cfg.sta.password, RADAR_WIFI_PASSWORD, sizeof(cfg.sta.password));
-    cfg.sta.threshold.authmode = strlen(RADAR_WIFI_PASSWORD) ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
+    // strlcpy((char *)cfg.sta.ssid, RADAR_WIFI_SSID, sizeof(cfg.sta.ssid));
+    // strlcpy((char *)cfg.sta.password, RADAR_WIFI_PASSWORD, sizeof(cfg.sta.password));
+    // cfg.sta.threshold.authmode = strlen(RADAR_WIFI_PASSWORD) ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
+    // ⚫ MODIFIÉ (25/10/2026) : réseau enregistré (portail) ou wifi_credentials.h, cf. radar_wifi_start()
+    strlcpy((char *)cfg.sta.ssid, s_ssid, sizeof(cfg.sta.ssid));
+    strlcpy((char *)cfg.sta.password, s_pass, sizeof(cfg.sta.password));
+    cfg.sta.threshold.authmode = strlen(s_pass) ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
+    cfg.sta.pmf_cfg.capable = true;
+    s_sta_mode = true;
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));
     ESP_ERROR_CHECK(esp_wifi_start());
     // Économie d'énergie désactivée : sinon la radio dort entre deux balises et le flux CSI s'effondre
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     csi_enable();
+    xTaskCreatePinnedToCore(sta_watch_task, "sta_watch", 3072, NULL, 3, NULL, 0);   // ⚫ AJOUTÉ (25/10/2026)
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -159,9 +211,10 @@ static void wifi_start_sta(void) {
 // ---------------------------------------------------------------------------------------------------------
 
 static void passive_task(void *arg) {
-    wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&init));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+    // wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
+    // ESP_ERROR_CHECK(esp_wifi_init(&init));
+    // ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+    // ⚫ MODIFIÉ (25/10/2026) : initialisation faite par wifi_init_common()
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
@@ -208,12 +261,34 @@ static void passive_task(void *arg) {
 void radar_wifi_start(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    if (strlen(RADAR_WIFI_SSID) > 0) {
+    // if (strlen(RADAR_WIFI_SSID) > 0) {
+    //     strlcpy(s_ssid, RADAR_WIFI_SSID, sizeof(s_ssid));
+    //     ESP_LOGI(TAG, "mode connecté : %s, ping %d Hz", s_ssid, CONFIG_RADAR_PING_HZ);
+    //     wifi_start_sta();
+    // } else {
+    //     ESP_LOGI(TAG, "pas d'identifiants (main/wifi_credentials.h) : mode passif");
+    //     xTaskCreatePinnedToCore(passive_task, "radar_scan", 6144, NULL, 4, NULL, 0);
+    // }
+    // ⚫ MODIFIÉ (25/10/2026) : réseau enregistré par le portail (NVS) > wifi_credentials.h > portail QR code ;
+    // le mode passif se choisit depuis l'écran du portail
+    wifi_init_common();
+    bool saved = radar_cfg_load(s_ssid, sizeof(s_ssid), s_pass, sizeof(s_pass));
+    if (!saved && strlen(RADAR_WIFI_SSID) > 0) {
         strlcpy(s_ssid, RADAR_WIFI_SSID, sizeof(s_ssid));
-        ESP_LOGI(TAG, "mode connecté : %s, ping %d Hz", s_ssid, CONFIG_RADAR_PING_HZ);
-        wifi_start_sta();
-    } else {
-        ESP_LOGI(TAG, "pas d'identifiants (main/wifi_credentials.h) : mode passif");
+        strlcpy(s_pass, RADAR_WIFI_PASSWORD, sizeof(s_pass));
+    }
+    bool has_ssid = s_ssid[0] != 0;
+    char req = radar_take_boot_request();
+    if (req == 'P') {
+        wifi_portal_start("Configuration demandée", has_ssid);
+    } else if (req == 'S') {
+        ESP_LOGI(TAG, "mode passif demandé");
         xTaskCreatePinnedToCore(passive_task, "radar_scan", 6144, NULL, 4, NULL, 0);
+    } else if (!has_ssid) {
+        wifi_portal_start("Aucun réseau Wi-Fi enregistré", false);
+    } else {
+        ESP_LOGI(TAG, "mode connecté : %s (%s), ping %d Hz", s_ssid, saved ? "enregistré" : "wifi_credentials.h",
+                 CONFIG_RADAR_PING_HZ);
+        wifi_start_sta();
     }
 }

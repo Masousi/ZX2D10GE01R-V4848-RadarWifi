@@ -79,6 +79,21 @@ void radar_set_link(const char *ssid, int channel, bool passive, const char *msg
     portEXIT_CRITICAL(&s_lock);
 }
 
+// ⚫ AJOUTÉ (25/10/2026) : état du portail de configuration Wi-Fi (affiché par radar_ui.c)
+void radar_set_portal(bool on, const char *msg, bool has_saved_ssid) {
+    portENTER_CRITICAL(&s_lock);
+    s_st.portal = on;
+    s_st.has_saved_ssid = has_saved_ssid;
+    strlcpy(s_st.portal_msg, msg ? msg : "", sizeof(s_st.portal_msg));
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void radar_set_portal_clients(int n) {
+    portENTER_CRITICAL(&s_lock);
+    s_st.portal_clients = n;
+    portEXIT_CRITICAL(&s_lock);
+}
+
 void radar_request_calibration(void) {
     s_cal_request = true;
 }

@@ -10,6 +10,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>   // ⚫ AJOUTÉ (25/10/2026) : size_t
 #include <stdint.h>
 
 // Sous-porteuses utiles du LLTF (20 MHz) : indices 2..26 et 38..63 du buffer CSI
@@ -51,17 +52,34 @@ typedef struct {
     bool passive;         // true : écoute passive d'un AP voisin, false : connecté (STA + ping)
     char ssid[33];
     char link_msg[48];    // message affiché pendant RADAR_ST_WIFI
+    // ⚫ AJOUTÉ (25/10/2026) : portail de configuration Wi-Fi (point d'accès CONFIG_RADAR_AP_SSID + QR code)
+    bool portal;          // portail actif : l'écran affiche le QR code
+    int portal_clients;   // téléphones connectés au point d'accès
+    bool has_saved_ssid;  // un réseau est déjà enregistré (appui = réessayer) ; sinon appui = mode passif
+    char portal_msg[64];  // raison de l'ouverture du portail
     uint32_t motion_events;
 } radar_status_t;
 
 // radar_wifi.c
 void radar_wifi_start(void);
 
+// ⚫ AJOUTÉ (25/10/2026) : wifi_portal.c (portail de configuration, identifiants en NVS)
+#define RADAR_AP_IP "192.168.4.1"
+bool radar_cfg_load(char *ssid, size_t ssid_cap, char *pass, size_t pass_cap);
+void wifi_portal_start(const char *reason, bool has_saved_ssid);
+char radar_take_boot_request(void);   // demande faite avant le redémarrage : 'P' portail, 'S' passif, 0 aucune
+void radar_request_portal(void);      // redémarre sur le portail
+void radar_request_passive(void);     // redémarre en mode passif (sans connexion)
+void radar_request_retry(void);       // redémarre normalement (nouvel essai du réseau enregistré)
+
 // radar_dsp.c
 void radar_dsp_start(void);
 bool radar_dsp_push(const radar_sample_t *s);         // appelé depuis le callback CSI (non bloquant)
 void radar_get_status(radar_status_t *out);           // copie thread-safe de l'état
 void radar_set_link(const char *ssid, int channel, bool passive, const char *msg);
+// ⚫ AJOUTÉ (25/10/2026)
+void radar_set_portal(bool on, const char *msg, bool has_saved_ssid);
+void radar_set_portal_clients(int n);
 void radar_request_calibration(void);
 void radar_set_sensitivity(int s);
 
